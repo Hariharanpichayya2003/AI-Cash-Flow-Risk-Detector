@@ -1,0 +1,101 @@
+Invoice_Amount,Payment_Method,Dispute,Avg_Past_Delay
+30313,Wire,1,6
+24587,Wire,0,1
+47265,ACH,0,0
+37008,Check,1,5
+43697,Wire,0,3
+35536,Check,0,4
+22572,Check,0,23
+24749,Check,0,25
+20841,Wire,0,20
+32639,Wire,0,16
+17439,ACH,0,10
+13273,ACH,0,8
+9368,ACH,0,20
+22725,Credit Card,0,6
+11214,Credit Card,0,24
+9436,Wire,0,20
+30911,ACH,0,27
+40104,ACH,0,27
+30324,ACH,0,27
+47504,Wire,0,19
+37808,ACH,1,6
+18428,Credit Card,0,2
+32225,Check,0,7
+14371,Credit Card,0,28
+14095,ACH,1,28
+3810,ACH,1,24
+23575,ACH,0,1
+2819,Wire,1,9
+44838,Check,0,15
+7884,Check,0,11
+16852,ACH,0,24
+40673,Wire,0,26
+36902,Check,0,27
+10745,Credit Card,0,15
+19505,Credit Card,0,4
+47240,Wire,1,23
+45309,Credit Card,1,11
+40151,Wire,0,4
+20299,Credit Card,1,15
+48635,Credit Card,1,5
+31618,ACH,0,20
+11592,Check,0,9
+6851,ACH,0,15
+33001,Credit Card,0,19
+27028,Credit Card,0,22
+10035,ACH,0,10
+46170,Credit Card,0,12
+33779,Check,0,26
+12997,Wire,0,24
+23385,Check,0,9
+30993,Credit Card,1,24
+20579,Credit Card,0,4
+36745,Wire,0,12
+21748,Credit Card,0,14
+16437,Wire,0,4
+43444,Wire,0,5
+22987,Wire,0,19
+18496,Credit Card,0,22
+6577,Check,0,13
+18010,Credit Card,0,22
+8673,Credit Card,0,25
+46032,Credit Card,0,24
+22504,Credit Card,0,27
+30335,Check,0,1
+26021,Wire,1,28
+37363,Credit Card,0,25
+5210,Credit Card,0,21
+16856,Credit Card,1,0
+46478,Wire,0,29
+34149,Wire,0,4
+15320,Wire,0,5
+34083,Wire,1,8
+26066,Wire,0,10
+34875,Credit Card,0,21
+32378,ACH,0,8
+13348,Credit Card,1,26
+5200,Wire,0,3
+41731,ACH,0,17
+37259,ACH,1,23
+36437,Check,0,14
+47741,Check,0,1
+8073,Credit Card,0,21
+19477,Wire,0,22
+36165,Wire,0,20
+12711,Check,0,29
+15782,Check,0,0
+45575,Check,0,13
+27462,Credit Card,0,13
+46835,Check,1,10
+3796,Check,1,10
+48972,ACH,1,27
+49983,Credit Card,0,19
+47774,Wire,0,16
+33734,ACH,0,2
+36045,ACH,0,28
+40447,Credit Card,0,5
+15634,Wire,1,26
+23875,Credit Card,0,26
+21645,ACH,0,13
+26760,Credit Card,1,28
