@@ -1,10 +1,17 @@
+import os
+# Force math libraries to use only 1 thread to prevent OpenBLAS memory errors
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
 import streamlit as st
 import pandas as pd
 import joblib
 import numpy as np
 import plotly.express as px
+import google.generativeai as genai
 
-# --- 1. ASSET LOADING ---
+# --- 1. ASSET LOADING & AI SETUP ---
 @st.cache_resource
 def load_models():
     model = joblib.load('risk_model.pkl')
@@ -14,9 +21,50 @@ def load_models():
 
 model, scaler, le_risk = load_models()
 
+# Configuration using the model alias confirmed by your system
+genai.configure(api_key="AIzaSyANErM5jqHiDzeyH1IUI80xzKvgP7o9gjM")
+ai_brain = genai.GenerativeModel('models/gemini-3-flash-preview')
+
+def get_ai_response(user_query, context_data):
+    """Generates a contextual response from Gemini"""
+    prompt = f"""
+    You are 'Growfin-Bot', an expert Finance AI Assistant. 
+    A user is reviewing cash flow risk data with this summary: {context_data}.
+    Based on this context, answer the user's question professionally.
+    User Question: {user_query}
+    """
+    response = ai_brain.generate_content(prompt)
+    return response.text
+
+def get_batch_summary(df):
+    """Provides a full breakdown of Risk, Delays, and Disputes for the AI"""
+    total = len(df)
+    risk_counts = df['Predicted_Risk'].value_counts()
+    
+    # Categorical Risk Breakdown
+    high = risk_counts.get('High Risk', 0)
+    medium = risk_counts.get('Medium Risk', 0)
+    low = risk_counts.get('Low Risk', 0)
+    
+    # Dispute and Delay Logic
+    # (Assuming Dispute is 1 for 'Yes' and 0 for 'No')
+    active_disputes = len(df[df['Dispute'] == 1])
+    long_delays = len(df[df['Avg_Past_Delay'] > 20])
+    
+    total_value = df['Invoice_Amount'].sum()
+    
+    # Creating a data-rich string for Growfin-Bot
+    summary = (
+        f"Portfolio Summary: {total} total invoices. "
+        f"Risk Breakdown: {high} High, {medium} Medium, {low} Low. "
+        f"Active Disputes: {active_disputes} invoices are currently contested. "
+        f"Payment Delays: {long_delays} customers have delays > 20 days. "
+        f"Total Exposure: ${total_value:,.2f}."
+    )
+    return summary
+
 # --- 2. NOTIFICATION LOGIC ---
 def trigger_notification(amount, risk, delay, is_batch=False, count=0):
-    """Handles both individual alerts and batch summary alerts"""
     if risk == "High Risk":
         if is_batch:
             st.toast(f"Batch Alert: {count} High Risk accounts identified!", icon="⚠️")
@@ -51,6 +99,10 @@ def process_batch(df_input):
 # --- 5. SESSION STATE INITIALIZATION ---
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = []
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+if 'batch_chat_history' not in st.session_state:
+    st.session_state.batch_chat_history = []
 
 # --- 6. SIDEBAR ---
 st.sidebar.header("Individual Invoice Details")
@@ -77,7 +129,6 @@ with tab1:
             'Invoice_Amount': invoice_amt, 'Payment_Method': payment_method,
             'Dispute': dispute_radio, 'Avg_Past_Delay': past_delay, 'Risk_Level': final_result
         })
-
         trigger_notification(invoice_amt, final_result, past_delay)
 
     if st.session_state.watchlist:
@@ -96,7 +147,9 @@ with tab1:
         with c2:
             st.write("**Risk Volume (Bar Chart)**")
             st.bar_chart(risk_counts)
+        
         st.dataframe(watch_df, use_container_width=True)
+        
         col_btn1, col_btn2 = st.columns([1, 4])
         with col_btn1:
             watchlist_csv = watch_df.to_csv(index=False).encode('utf-8')
@@ -104,7 +157,26 @@ with tab1:
         with col_btn2:
             if st.button("🗑️ Clear List"):
                 st.session_state.watchlist = []
+                st.session_state.chat_history = []
                 st.rerun()
+
+        st.divider()
+        st.subheader("💬 Chat with Growfin-Bot (Single Analysis)")
+        latest = st.session_state.watchlist[-1]
+        context_str = f"Invoice of ${latest['Invoice_Amount']}, Risk: {latest['Risk_Level']}, Delay: {latest['Avg_Past_Delay']} days, Dispute: {latest['Dispute']}."
+
+        for msg in st.session_state.chat_history:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        if user_query := st.chat_input("Ask about the latest invoice...", key="chat_tab1"):
+            st.session_state.chat_history.append({"role": "user", "content": user_query})
+            with st.chat_message("user"):
+                st.markdown(user_query)
+            with st.chat_message("assistant"):
+                ai_reply = get_ai_response(user_query, context_str)
+                st.markdown(ai_reply)
+                st.session_state.chat_history.append({"role": "assistant", "content": ai_reply})
 
 with tab2:
     st.header("📂 Bulk Invoice Analysis")
@@ -117,35 +189,30 @@ with tab2:
             results_df = process_batch(raw_df)
             counts = results_df['Predicted_Risk'].value_counts()
             
-            # 1. Metrics
             m1, m2, m3 = st.columns(3)
             m1.metric("Low Risk ✅", counts.get('Low Risk', 0))
             m2.metric("Medium Risk ⚠️", counts.get('Medium Risk', 0))
             m3.metric("High Risk 🚨", counts.get('High Risk', 0))
 
-            # 2. Batch Notification Trigger
             high_risk_count = counts.get('High Risk', 0)
             if high_risk_count > 0:
                 trigger_notification(None, "High Risk", None, is_batch=True, count=high_risk_count)
 
-            # --- NEW: LIVE BATCH CHARTS ---
             st.divider()
             st.write("### 📊 Batch Portfolio Visual Insights")
             bc1, bc2 = st.columns(2)
             
             with bc1:
-                st.write("**Batch Risk Mix (Donut Chart)**")
+                st.write("**Batch Risk Mix**")
                 fig_bulk = px.pie(names=counts.index, values=counts.values, hole=0.4,
                                  color=counts.index, color_discrete_map={
                                      'High Risk': '#ff4b4b', 'Medium Risk': '#ffa500', 'Low Risk': '#28a745'
                                  })
-                fig_bulk.update_layout(height=300, margin=dict(t=0,b=0,l=0,r=0))
                 st.plotly_chart(fig_bulk, use_container_width=True)
                 
             with bc2:
-                st.write("**Batch Risk Volume (Bar Chart)**")
+                st.write("**Batch Risk Volume**")
                 st.bar_chart(counts)
-            # ------------------------------
 
             def color_risk(val):
                 color = 'red' if val == 'High Risk' else ('orange' if val == 'Medium Risk' else 'green')
@@ -156,5 +223,28 @@ with tab2:
             
             batch_csv = results_df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Download Full Analysis", batch_csv, "batch_risk_report.csv", "text/csv")
+
+            # --- NEW: BATCH ANALYTICS CHATBOT ---
+            st.divider()
+            st.subheader("💬 Portfolio Strategy Chat")
+            
+            # Prepare summary context for the AI
+            batch_ctx = get_batch_summary(results_df)
+
+            for msg in st.session_state.batch_chat_history:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+
+            if batch_query := st.chat_input("Ask about high-risk trends or delays...", key="chat_tab2"):
+                st.session_state.batch_chat_history.append({"role": "user", "content": batch_query})
+                with st.chat_message("user"):
+                    st.markdown(batch_query)
+
+                with st.chat_message("assistant"):
+                    with st.spinner("Analyzing bulk data..."):
+                        ai_reply = get_ai_response(batch_query, batch_ctx)
+                        st.markdown(ai_reply)
+                        st.session_state.batch_chat_history.append({"role": "assistant", "content": ai_reply})
+
         except Exception as e:
             st.error(f"Error: {e}")
