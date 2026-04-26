@@ -19,11 +19,9 @@ def trigger_notification(amount, risk, delay, is_batch=False, count=0):
     """Handles both individual alerts and batch summary alerts"""
     if risk == "High Risk":
         if is_batch:
-            # Summary notification for bulk upload
             st.toast(f"Batch Alert: {count} High Risk accounts identified!", icon="⚠️")
             st.warning(f"🚨 **Action Required:** {count} critical risks detected in this batch. Recovery Team notified.")
         else:
-            # Individual notification for watchlist
             st.toast(f"Escalated ${amount} to Recovery Team", icon="🚨")
             st.error(f"⚠️ High Risk Action: Automated notification sent to Collections (Delay: {delay} days).")
 
@@ -80,7 +78,6 @@ with tab1:
             'Dispute': dispute_radio, 'Avg_Past_Delay': past_delay, 'Risk_Level': final_result
         })
 
-        # Individual Notification Trigger
         trigger_notification(invoice_amt, final_result, past_delay)
 
     if st.session_state.watchlist:
@@ -113,28 +110,50 @@ with tab2:
     st.header("📂 Bulk Invoice Analysis")
     st.write("Upload a CSV file containing: `Invoice_Amount`, `Payment_Method`, `Dispute`, `Avg_Past_Delay`.")
     uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+    
     if uploaded_file is not None:
         raw_df = pd.read_csv(uploaded_file)
         try:
             results_df = process_batch(raw_df)
             counts = results_df['Predicted_Risk'].value_counts()
             
-            # Metrics
+            # 1. Metrics
             m1, m2, m3 = st.columns(3)
             m1.metric("Low Risk ✅", counts.get('Low Risk', 0))
             m2.metric("Medium Risk ⚠️", counts.get('Medium Risk', 0))
             m3.metric("High Risk 🚨", counts.get('High Risk', 0))
 
-            # Batch Notification Trigger
+            # 2. Batch Notification Trigger
             high_risk_count = counts.get('High Risk', 0)
             if high_risk_count > 0:
                 trigger_notification(None, "High Risk", None, is_batch=True, count=high_risk_count)
+
+            # --- NEW: LIVE BATCH CHARTS ---
+            st.divider()
+            st.write("### 📊 Batch Portfolio Visual Insights")
+            bc1, bc2 = st.columns(2)
+            
+            with bc1:
+                st.write("**Batch Risk Mix (Donut Chart)**")
+                fig_bulk = px.pie(names=counts.index, values=counts.values, hole=0.4,
+                                 color=counts.index, color_discrete_map={
+                                     'High Risk': '#ff4b4b', 'Medium Risk': '#ffa500', 'Low Risk': '#28a745'
+                                 })
+                fig_bulk.update_layout(height=300, margin=dict(t=0,b=0,l=0,r=0))
+                st.plotly_chart(fig_bulk, use_container_width=True)
+                
+            with bc2:
+                st.write("**Batch Risk Volume (Bar Chart)**")
+                st.bar_chart(counts)
+            # ------------------------------
 
             def color_risk(val):
                 color = 'red' if val == 'High Risk' else ('orange' if val == 'Medium Risk' else 'green')
                 return f'color: {color}; font-weight: bold'
             
+            st.subheader("Detailed Analysis")
             st.dataframe(results_df.style.map(color_risk, subset=['Predicted_Risk']), use_container_width=True)
+            
             batch_csv = results_df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Download Full Analysis", batch_csv, "batch_risk_report.csv", "text/csv")
         except Exception as e:
