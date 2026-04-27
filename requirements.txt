@@ -5,3 +5,4 @@ scikit-learn
 joblib
 imblearn
 plotly
+google.generativeai
