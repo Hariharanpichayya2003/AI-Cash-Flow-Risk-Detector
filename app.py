@@ -1,9 +1,4 @@
 import os
-# Force math libraries to use only 1 thread to prevent OpenBLAS memory errors
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-
 import streamlit as st
 import pandas as pd
 import joblib
@@ -21,230 +16,161 @@ def load_models():
 
 model, scaler, le_risk = load_models()
 
-# Configuration using the model alias confirmed by your system
-genai.configure(api_key="AIzaSyANErM5jqHiDzeyH1IUI80xzKvgP7o9gjM")
+# AI Configuration (Using your provided key)
+genai.configure(api_key="AIzaSyDLpZ9k4GQXKFAUVWPafUUkK7x2yCKMrAo")
 ai_brain = genai.GenerativeModel('models/gemini-3-flash-preview')
 
 def get_ai_response(user_query, context_data):
-    """Generates a contextual response from Gemini"""
     prompt = f"""
-    You are 'Growfin-Bot', an expert Finance AI Assistant. 
-    A user is reviewing cash flow risk data with this summary: {context_data}.
-    Based on this context, answer the user's question professionally.
+    You are 'Growfin-Bot', a Finance AI Assistant. 
+    Context of current data: {context_data}
+    
+    Answer the user's question based strictly on this data. Be concise and professional.
     User Question: {user_query}
     """
     response = ai_brain.generate_content(prompt)
     return response.text
 
-def get_batch_summary(df):
-    """Provides a full breakdown of Risk, Delays, and Disputes for the AI"""
-    total = len(df)
-    risk_counts = df['Predicted_Risk'].value_counts()
-    
-    # Categorical Risk Breakdown
-    high = risk_counts.get('High Risk', 0)
-    medium = risk_counts.get('Medium Risk', 0)
-    low = risk_counts.get('Low Risk', 0)
-    
-    # Dispute and Delay Logic
-    # (Assuming Dispute is 1 for 'Yes' and 0 for 'No')
-    active_disputes = len(df[df['Dispute'] == 1])
-    long_delays = len(df[df['Avg_Past_Delay'] > 20])
-    
-    total_value = df['Invoice_Amount'].sum()
-    
-    # Creating a data-rich string for Growfin-Bot
-    summary = (
-        f"Portfolio Summary: {total} total invoices. "
-        f"Risk Breakdown: {high} High, {medium} Medium, {low} Low. "
-        f"Active Disputes: {active_disputes} invoices are currently contested. "
-        f"Payment Delays: {long_delays} customers have delays > 20 days. "
-        f"Total Exposure: ${total_value:,.2f}."
-    )
-    return summary
-
-# --- 2. NOTIFICATION LOGIC ---
-def trigger_notification(amount, risk, delay, is_batch=False, count=0):
-    if risk == "High Risk":
-        if is_batch:
-            st.toast(f"Batch Alert: {count} High Risk accounts identified!", icon="⚠️")
-            st.warning(f"🚨 **Action Required:** {count} critical risks detected in this batch. Recovery Team notified.")
-        else:
-            st.toast(f"Escalated ${amount} to Recovery Team", icon="🚨")
-            st.error(f"⚠️ High Risk Action: Automated notification sent to Collections (Delay: {delay} days).")
-
-# --- 3. UI SETUP ---
-st.set_page_config(page_title="AI Cash Flow Risk Detector", layout="wide")
-st.title("🛡️ AI Cash Flow Risk Detector")
-
-# --- 4. HELPER FUNCTIONS ---
+# --- 2. LOGIC HELPERS ---
 def apply_business_rules(risk_label, delay, dispute):
-    if delay > 15 or dispute == 1:
+    if delay > 20 or dispute == 1:
         return 'High Risk'
     return risk_label
 
 def process_batch(df_input):
     required_cols = ['Invoice_Amount', 'Payment_Method', 'Dispute', 'Avg_Past_Delay']
     method_map = {"ACH": 0, "Check": 1, "Credit Card": 2, "Wire": 3}
+    
+    # Check for missing required columns
+    missing = [col for col in required_cols if col not in df_input.columns]
+    if missing:
+        st.error(f"CSV is missing required columns: {missing}")
+        return None
+
     df_model = df_input[required_cols].copy()
+    
+    # Handle mixed data types for Dispute
+    if df_model['Dispute'].dtype == object:
+        df_model['Dispute'] = df_model['Dispute'].map({"Yes": 1, "No": 0}).fillna(0)
+    
     df_model['Payment_Method'] = df_model['Payment_Method'].map(method_map).fillna(0)
     X_scaled = scaler.transform(df_model)
     preds = model.predict(X_scaled)
     df_input['Predicted_Risk'] = le_risk.inverse_transform(preds)
+    
+    # Apply Business Overlays
     df_input['Predicted_Risk'] = df_input.apply(
-        lambda x: apply_business_rules(x['Predicted_Risk'], x['Avg_Past_Delay'], x['Dispute']), axis=1
+        lambda x: apply_business_rules(x['Predicted_Risk'], x['Avg_Past_Delay'], 1 if x['Dispute'] in [1, "Yes"] else 0), axis=1
     )
     return df_input
 
-# --- 5. SESSION STATE INITIALIZATION ---
-if 'watchlist' not in st.session_state:
-    st.session_state.watchlist = []
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-if 'batch_chat_history' not in st.session_state:
-    st.session_state.batch_chat_history = []
+# --- 3. UI INITIALIZATION ---
+st.set_page_config(page_title="AI Cash Flow Risk Detector", layout="wide")
+st.title("🛡️ AI Cash Flow Risk Detector")
 
-# --- 6. SIDEBAR ---
+if 'watchlist' not in st.session_state: st.session_state.watchlist = []
+if 'chat_history' not in st.session_state: st.session_state.chat_history = []
+if 'bulk_chat_history' not in st.session_state: st.session_state.bulk_chat_history = []
+
+# --- 4. SIDEBAR ---
 st.sidebar.header("Individual Invoice Details")
+cust_id = st.sidebar.text_input("Customer ID", value="CUST-001")
 invoice_amt = st.sidebar.number_input("Invoice Amount ($)", min_value=0, value=5000)
 payment_method = st.sidebar.selectbox("Payment Method", ["ACH", "Check", "Credit Card", "Wire"])
 dispute_radio = st.sidebar.radio("Active Dispute?", ["No", "Yes"])
 past_delay = st.sidebar.slider("Average Past Delays (Days)", 0, 60, 5)
 
-# --- 7. TABS INTERFACE ---
 tab1, tab2 = st.tabs(["Live Monitoring Watchlist", "Bulk Upload (CSV)"])
 
+# --- TAB 1: SINGLE PREDICTION ---
 with tab1:
-    st.subheader("Add to Watchlist")
     if st.sidebar.button("Analyze & Add to Watchlist"):
+        dispute_num = 1 if dispute_radio == "Yes" else 0
         method_map = {"ACH": 0, "Check": 1, "Credit Card": 2, "Wire": 3}
-        dispute_val = 1 if dispute_radio == "Yes" else 0
-        input_data = pd.DataFrame([[invoice_amt, method_map[payment_method], dispute_val, past_delay]], 
-                                 columns=['Invoice_Amount', 'Payment_Method', 'Dispute', 'Avg_Past_Delay'])
-        scaled = scaler.transform(input_data)
-        result = le_risk.inverse_transform(model.predict(scaled))[0]
-        final_result = apply_business_rules(result, past_delay, dispute_val)
+        
+        input_df = pd.DataFrame([[invoice_amt, method_map[payment_method], dispute_num, past_delay]], 
+                                columns=['Invoice_Amount', 'Payment_Method', 'Dispute', 'Avg_Past_Delay'])
+        
+        scaled = scaler.transform(input_df)
+        pred = le_risk.inverse_transform(model.predict(scaled))[0]
+        final_risk = apply_business_rules(pred, past_delay, dispute_num)
         
         st.session_state.watchlist.append({
-            'Invoice_Amount': invoice_amt, 'Payment_Method': payment_method,
-            'Dispute': dispute_radio, 'Avg_Past_Delay': past_delay, 'Risk_Level': final_result
+            'Customer_ID': cust_id, 'Invoice_Amount': invoice_amt, 
+            'Payment_Method': payment_method, 'Dispute': dispute_radio, 
+            'Avg_Past_Delay': past_delay, 'Risk_Level': final_risk
         })
-        trigger_notification(invoice_amt, final_result, past_delay)
 
     if st.session_state.watchlist:
-        watch_df = pd.DataFrame(st.session_state.watchlist)
-        risk_counts = watch_df['Risk_Level'].value_counts()
-        st.divider()
+        w_df = pd.DataFrame(st.session_state.watchlist)
         c1, c2 = st.columns(2)
+        counts = w_df['Risk_Level'].value_counts()
         with c1:
-            st.write("**Risk Distribution (Donut Chart)**")
-            fig = px.pie(names=risk_counts.index, values=risk_counts.values, hole=0.4,
-                         color=risk_counts.index, color_discrete_map={
-                             'High Risk': '#ff4b4b', 'Medium Risk': '#ffa500', 'Low Risk': '#28a745'
-                         })
-            fig.update_layout(height=300, margin=dict(t=0,b=0,l=0,r=0))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(px.pie(names=counts.index, values=counts.values, hole=0.4, 
+                         color=counts.index, color_discrete_map={'High Risk': '#ff4b4b', 'Medium Risk': '#ffa500', 'Low Risk': '#28a745'}))
         with c2:
-            st.write("**Risk Volume (Bar Chart)**")
-            st.bar_chart(risk_counts)
+            st.bar_chart(counts)
+            
+        st.dataframe(w_df, use_container_width=True)
         
-        st.dataframe(watch_df, use_container_width=True)
-        
-        col_btn1, col_btn2 = st.columns([1, 4])
-        with col_btn1:
-            watchlist_csv = watch_df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Download CSV", watchlist_csv, "watchlist_report.csv", "text/csv")
-        with col_btn2:
-            if st.button("🗑️ Clear List"):
-                st.session_state.watchlist = []
-                st.session_state.chat_history = []
-                st.rerun()
+        st.subheader("💬 Hi ! HOW CAN  I HELP YOU ")
+        if user_q := st.chat_input("Ask about these specific customers...", key="q1"):
+            st.session_state.chat_history.append({"role": "user", "content": user_q})
+            reply = get_ai_response(user_q, w_df.to_string())
+            st.session_state.chat_history.append({"role": "assistant", "content": reply})
+            st.rerun()
 
-        st.divider()
-        st.subheader("💬 Chat with Growfin-Bot (Single Analysis)")
-        latest = st.session_state.watchlist[-1]
-        context_str = f"Invoice of ${latest['Invoice_Amount']}, Risk: {latest['Risk_Level']}, Delay: {latest['Avg_Past_Delay']} days, Dispute: {latest['Dispute']}."
+        for m in st.session_state.chat_history:
+            st.chat_message(m["role"]).write(m["content"])
 
-        for msg in st.session_state.chat_history:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-        if user_query := st.chat_input("Ask about the latest invoice...", key="chat_tab1"):
-            st.session_state.chat_history.append({"role": "user", "content": user_query})
-            with st.chat_message("user"):
-                st.markdown(user_query)
-            with st.chat_message("assistant"):
-                ai_reply = get_ai_response(user_query, context_str)
-                st.markdown(ai_reply)
-                st.session_state.chat_history.append({"role": "assistant", "content": ai_reply})
-
+# --- TAB 2: BULK PREDICTION ---
 with tab2:
     st.header("📂 Bulk Invoice Analysis")
-    st.write("Upload a CSV file containing: `Invoice_Amount`, `Payment_Method`, `Dispute`, `Avg_Past_Delay`.")
-    uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+    uploaded_file = st.file_uploader("Upload CSV for Bulk Analysis", type="csv")
     
-    if uploaded_file is not None:
-        raw_df = pd.read_csv(uploaded_file)
+    if uploaded_file:
         try:
-            results_df = process_batch(raw_df)
-            counts = results_df['Predicted_Risk'].value_counts()
+            bulk_df = pd.read_csv(uploaded_file)
+            results_df = process_batch(bulk_df)
             
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Low Risk ✅", counts.get('Low Risk', 0))
-            m2.metric("Medium Risk ⚠️", counts.get('Medium Risk', 0))
-            m3.metric("High Risk 🚨", counts.get('High Risk', 0))
-
-            high_risk_count = counts.get('High Risk', 0)
-            if high_risk_count > 0:
-                trigger_notification(None, "High Risk", None, is_batch=True, count=high_risk_count)
-
-            st.divider()
-            st.write("### 📊 Batch Portfolio Visual Insights")
-            bc1, bc2 = st.columns(2)
-            
-            with bc1:
-                st.write("**Batch Risk Mix**")
-                fig_bulk = px.pie(names=counts.index, values=counts.values, hole=0.4,
-                                 color=counts.index, color_discrete_map={
-                                     'High Risk': '#ff4b4b', 'Medium Risk': '#ffa500', 'Low Risk': '#28a745'
-                                 })
-                st.plotly_chart(fig_bulk, use_container_width=True)
+            if results_df is not None:
+                # Show Visuals
+                b1, b2, b3 = st.columns(3)
+                b_counts = results_df['Predicted_Risk'].value_counts()
+                b1.metric("Total Invoices", len(results_df))
+                b2.metric("High Risk Identified", b_counts.get('High Risk', 0))
+                b3.metric("Total Exposure", f"${results_df['Invoice_Amount'].sum():,.2f}")
                 
-            with bc2:
-                st.write("**Batch Risk Volume**")
-                st.bar_chart(counts)
+                st.plotly_chart(px.bar(x=b_counts.index, y=b_counts.values, title="Risk Counts", labels={'x':'Risk', 'y':'Count'}), use_container_width=True)
+                st.dataframe(results_df, use_container_width=True)
+                
+                st.divider()
+                st.subheader("💬 Bulk Portfolio Analyst")
+                st.info("Growfin-Bot is now analyzing your entire CSV. You can ask about trends or specific totals.")
+                
+                # --- FLEXIBLE SUMMARY LOGIC ---
+                # Check if 'Customer_ID' exists to avoid the Label error
+                if 'Customer_ID' in results_df.columns:
+                    summary_context = results_df.groupby('Predicted_Risk').agg({
+                        'Invoice_Amount': 'sum',
+                        'Customer_ID': 'count'
+                    }).to_string()
+                else:
+                    # Fallback if Customer_ID is missing
+                    summary_context = results_df.groupby('Predicted_Risk').agg({
+                        'Invoice_Amount': 'sum',
+                        'Predicted_Risk': 'count'
+                    }).rename(columns={'Predicted_Risk': 'Record_Count'}).to_string()
+                
+                if bulk_q := st.chat_input("Ask about the CSV data (e.g. 'How much money is in High Risk?')", key="q2"):
+                    st.session_state.bulk_chat_history.append({"role": "user", "content": bulk_q})
+                    full_context = f"Summary: {summary_context}\nFull Data Preview: {results_df.head(20).to_string()}"
+                    reply = get_ai_response(bulk_q, full_context)
+                    st.session_state.bulk_chat_history.append({"role": "assistant", "content": reply})
+                    st.rerun()
 
-            def color_risk(val):
-                color = 'red' if val == 'High Risk' else ('orange' if val == 'Medium Risk' else 'green')
-                return f'color: {color}; font-weight: bold'
-            
-            st.subheader("Detailed Analysis")
-            st.dataframe(results_df.style.map(color_risk, subset=['Predicted_Risk']), use_container_width=True)
-            
-            batch_csv = results_df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Download Full Analysis", batch_csv, "batch_risk_report.csv", "text/csv")
-
-            # --- NEW: BATCH ANALYTICS CHATBOT ---
-            st.divider()
-            st.subheader("💬 Portfolio Strategy Chat")
-            
-            # Prepare summary context for the AI
-            batch_ctx = get_batch_summary(results_df)
-
-            for msg in st.session_state.batch_chat_history:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-
-            if batch_query := st.chat_input("Ask about high-risk trends or delays...", key="chat_tab2"):
-                st.session_state.batch_chat_history.append({"role": "user", "content": batch_query})
-                with st.chat_message("user"):
-                    st.markdown(batch_query)
-
-                with st.chat_message("assistant"):
-                    with st.spinner("Analyzing bulk data..."):
-                        ai_reply = get_ai_response(batch_query, batch_ctx)
-                        st.markdown(ai_reply)
-                        st.session_state.batch_chat_history.append({"role": "assistant", "content": ai_reply})
-
+                for bm in st.session_state.bulk_chat_history:
+                    st.chat_message(bm["role"]).write(bm["content"])
+                
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Analysis failed: {e}")
