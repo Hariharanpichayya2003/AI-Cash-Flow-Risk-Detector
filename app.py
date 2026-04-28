@@ -17,7 +17,7 @@ def load_models():
 model, scaler, le_risk = load_models()
 
 # AI Configuration (Using your provided key)
-genai.configure(api_key="AIzaSyDLpZ9k4GQXKFAUVWPafUUkK7x2yCKMrAo")
+genai.configure(api_key="AIzaSyDnzC_eiK0QY_bGa6R49VGKCalRBQ-O-Mk")
 ai_brain = genai.GenerativeModel('models/gemini-3-flash-preview')
 
 def get_ai_response(user_query, context_data):
