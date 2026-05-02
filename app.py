@@ -5,9 +5,10 @@ import joblib
 import numpy as np
 import plotly.express as px
 import google.generativeai as genai
-import pyttsx3
+
 import threading
-import pythoncom
+from gtts import gTTS
+import base64
 import speech_recognition as sr
 import time
 import sounddevice as sd
