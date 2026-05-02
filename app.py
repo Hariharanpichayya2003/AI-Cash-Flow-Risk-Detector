@@ -11,7 +11,7 @@ from gtts import gTTS
 import base64
 import speech_recognition as sr
 import time
-import sounddevice as sd
+
 import wave
 import tempfile
 import gc
