@@ -6,12 +6,5 @@ joblib
 imblearn
 plotly
 google.generativeai
-pyttsx3
-threading
-pythoncom
-speech_recognition
-time
-sounddevice
-wave
-tempfile
-gc
+gTTS
+streamlit-mic-recorder
