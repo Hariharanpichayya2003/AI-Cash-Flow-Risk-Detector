@@ -303,24 +303,43 @@ with tab2:
         if bulk_q := st.chat_input("Ask about the combined data...", key="q2"):
             st.session_state.bulk_chat_history.append({"role": "user", "content": bulk_q})
             
-            # 1. RAG LOGIC: Initialize our search engine using the loaded data
-            rag_retriever = initialize_rag_search_engine(res_df)
+            matching_rows_text = ""
+            upper_q = bulk_q.upper()
             
-            # 2. DEFAULT FALLBACK: If RAG index fails, fallback safely to standard summary string
-            rag_context = full_stat_summary
+            # Extract any Customer ID mentioned in the query
+            detected_customers = [cid for cid in res_df['Customer_ID'].astype(str).unique() if str(cid).upper() in upper_q]
             
-            if rag_retriever:
-                # 3. RETRIEVAL: Search vector database and retrieve ONLY the top 4 matching data rows
-                matching_docs = rag_retriever.get_relevant_documents(bulk_q)
-                vector_context = "\n\n".join([doc.page_content for doc in matching_docs])
+            if detected_customers:
+                # Direct Pandas exact match extraction (Keyword backup)
+                matched_df = res_df[res_df['Customer_ID'].astype(str).isin(detected_customers)].copy()
                 
-                # Combined context passing high-level math overview + precise vector row extracts
-                rag_context = f"AGGREGATED FINANCIAL STATS:\n{full_stat_summary}\n\nRELEVANT DETAILED ROWS DETECTED:\n{vector_context}"
+                # Format the matched rows cleanly so Gemini reads it like a sentence
+                matching_rows_text = "EXACT MATCHED CUSTOMER DATA:\n"
+                for _, row in matched_df.iterrows():
+                    matching_rows_text += (
+                        f"- Customer {row['Customer_ID']}: Invoice Amount is ${row['Amount']}, "
+                        f"Payment Method is {row['Payment_Method']}, "
+                        f"Active Dispute status is {row['Dispute']}, "
+                        f"and Average Past Delay is {row['Avg_Past_Delay']} days. "
+                        f"Final Assigned Status: {row['Risk_Level']}.\n"
+                    )
+            else:
+                # Fallback to Semantic Vector RAG Search if no exact ID is mentioned
+                rag_retriever = initialize_rag_search_engine(res_df)
+                if rag_retriever:
+                    matching_docs = rag_retriever.get_relevant_documents(bulk_q)
+                    matching_rows_text = "RELEVANT ROW SAMPLES:\n" + "\n".join([doc.page_content for doc in matching_docs])
             
-            # 4. GENERATION: Send optimized small context packet to Gemini
+            # Construct the ultra-precise context packet
+            rag_context = (
+                f"PORTFOLIO GENERAL STATS:\n{full_stat_summary}\n\n"
+                f"{matching_rows_text}\n\n"
+                f"INSTRUCTION: Answer the user's question using ONLY the facts provided above. "
+                f"If a customer has an Active Dispute status of 'Yes', explicitly state that this active dispute triggered an automatic business rule override to 'High Risk'. Do not speculate or assume historical details not listed."
+            )
+            
             reply = get_ai_response(bulk_q, rag_context)
             st.session_state.bulk_chat_history.append({"role": "assistant", "content": reply})
             st.rerun()
-
         for bm in st.session_state.bulk_chat_history:
             st.chat_message(bm["role"]).write(bm["content"])
