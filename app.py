@@ -7,6 +7,12 @@ import plotly.express as px
 import google.generativeai as genai
 import datetime 
 
+# NEW RAG IMPORTS: Added tools to handle data chunking, embeddings, and vector storage
+from langchain_community.document_loaders import DataFrameLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
 # --- 1. PERSISTENCE HELPERS (PHYSICALLY SEPARATED) ---
 MANUAL_FILE = "manual_watchlist.csv"
 BULK_CACHE_FILE = "bulk_history.csv"
@@ -15,7 +21,6 @@ def load_data(file_path):
     if os.path.exists(file_path):
         try:
             df = pd.read_csv(file_path)
-            # Ensure proper naming for UI/Logic consistency
             if 'Amount' in df.columns and 'Invoice_Amount' not in df.columns:
                 df = df.rename(columns={'Amount': 'Invoice_Amount'})
             if 'Date' in df.columns:
@@ -36,11 +41,7 @@ def load_models():
     le_risk = joblib.load('label_encoder.pkl')
     return model, scaler, le_risk
 
-
-# Check if running on Streamlit Cloud Secrets, otherwise fallback to local string
-# Hardcode your key safely for local testing or explicit assignment
-
-# Check if running on Streamlit Cloud Secrets, otherwise use the variable
+# Streamlit cloud secrets configuration setup
 api_key_source = None
 if "GEMINI_API_KEY" in st.secrets:
     api_key_source = st.secrets["GEMINI_API_KEY"]
@@ -48,11 +49,10 @@ else:
     st.warning("🔑 Setup Alert: Please save your Gemini API key inside Streamlit Cloud Secrets.")
 
 if api_key_source:
-    # Cast to a string to ensure transport layer compatibility on Linux containers
     genai.configure(api_key=str(api_key_source).strip())
 
-# Initialize the Gemini Flash core engine
-ai_brain = genai.GenerativeModel('models/gemini-3-flash-preview')
+# Use standard production Gemini model to bypass preview deprecation errors
+ai_brain = genai.GenerativeModel('models/gemini-1.5-flash')
 
 def get_ai_response(user_query, context_data):
     prompt = f"You are 'Growfin-Bot'. Context: {context_data}\nQuestion: {user_query}"
@@ -60,8 +60,39 @@ def get_ai_response(user_query, context_data):
         response = ai_brain.generate_content(prompt)
         return response.text
     except Exception as e:
-        # ADVANCED DEBUGGING: Return the real system error string if it hits a snag
         return f"AI Connection Error: {str(e)}"
+
+# --- NEW ADDITION: 🧠 THE RAG ENGINE FUNCTION ---
+@st.cache_resource
+def initialize_rag_search_engine(df_data):
+    """
+    Transforms a text dataframe into an optimized, highly semantic local vector search engine.
+    Cached via @st.cache_resource to prevent resource initialization loops on Streamlit refreshes.
+    """
+    try:
+        # Step A: Load the dataframe columns into document chunks
+        # We tell LangChain to use 'Risk_Level' as the primary text column to embed
+        loader = DataFrameLoader(df_data, page_content_column="Risk_Level")
+        raw_documents = loader.load()
+        
+        # Step B: Text Splitting (Ensures data fragments fit context pipelines cleanly)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        split_docs = text_splitter.split_documents(raw_documents)
+        
+        # Step C: Use Google Gemini's Embedding Model to translate financial data into numbers
+        embeddings_engine = GoogleGenerativeAIEmbeddings(
+            model="models/text-embedding-004",
+            google_api_key=str(api_key_source).strip()
+        )
+        
+        # Step D: Spin up a lightweight, local, in-memory Chroma Vector Database
+        vector_store = Chroma.from_documents(split_docs, embeddings_engine)
+        
+        # Return a retriever that fetches only the top 4 most contextually relevant rows
+        return vector_store.as_retriever(search_kwargs={"k": 4})
+    except Exception as e:
+        st.error(f"Failed to compile RAG framework index: {e}")
+        return None
 
 # --- 3. LOGIC HELPERS ---
 def apply_business_rules(risk_label, delay, dispute):
@@ -106,7 +137,6 @@ def process_batch(df_input):
 st.set_page_config(page_title="AI Cash Flow Risk Detector", layout="wide")
 st.title("🛡️ AI Cash Flow Risk Detector")
 
-# Session State for Chats
 if 'chat_history' not in st.session_state: st.session_state.chat_history = []
 if 'bulk_chat_history' not in st.session_state: st.session_state.bulk_chat_history = []
 
@@ -178,12 +208,10 @@ with tab1:
     else:
         st.info("Watchlist is empty.")
 
-# --- TAB 2: BULK PREDICTION (WITH PERSISTENT STACKING) ---
+# --- TAB 2: BULK PREDICTION (WITH RAG OPTIMIZATION) ---
 with tab2:
     st.header("📂 Bulk Invoice Analysis")
     
-    # 1. NEW: Initialize bulk storage from DISK so it persists across refreshes
-    # Using BULK_CACHE_FILE specifically to keep it separate from Tab 1
     if 'bulk_results' not in st.session_state:
         if os.path.exists(BULK_CACHE_FILE):
             st.session_state.bulk_results = pd.read_csv(BULK_CACHE_FILE)
@@ -206,7 +234,6 @@ with tab2:
                         ignore_index=True
                     ).drop_duplicates()
                     
-                    # NEW: Save to disk immediately after adding
                     st.session_state.bulk_results.to_csv(BULK_CACHE_FILE, index=False)
                     st.success(f"Added {len(new_results)} records permanently!")
                     st.rerun()
@@ -228,8 +255,6 @@ with tab2:
         btn_col1, btn_col2 = st.columns(2)
         with btn_col1:
             if st.button("🚀 Push ALL Session Data to Shared Dashboard"):
-                # FUNCTIONALITY: We save this to a NEW shared file instead of WATCHLIST_FILE
-                # to prevent bulk data from leaking into the Tab 1 Manual Watchlist
                 SHARED_BULK_FILE = "shared_bulk_dashboard.csv"
                 st.session_state.bulk_results.to_csv(SHARED_BULK_FILE, index=False)
                 st.success("All session records published to Bulk Client Portal!")
@@ -237,7 +262,7 @@ with tab2:
         with btn_col2:
             if st.button("🗑️ Clear Local Session"):
                 st.session_state.bulk_results = pd.DataFrame()
-                if os.path.exists(BULK_CACHE_FILE): os.remove(BULK_CACHE_FILE) # Clear the disk file
+                if os.path.exists(BULK_CACHE_FILE): os.remove(BULK_CACHE_FILE)
                 st.rerun()
 
         st.divider()
@@ -268,14 +293,30 @@ with tab2:
         st.dataframe(res_df, use_container_width=True)
         
         st.divider()
-        st.subheader("💬 Bulk Portfolio Analyst")
+        st.subheader("💬 Bulk Portfolio Analyst (RAG Activated)")
         
+        # Calculate a high-level statistics summary matrix string
         full_stat_summary = res_df.groupby(risk_col).agg({amt_col: ['sum', 'count', 'mean'], 'Avg_Past_Delay': 'mean'}).to_string()
 
         if bulk_q := st.chat_input("Ask about the combined data...", key="q2"):
             st.session_state.bulk_chat_history.append({"role": "user", "content": bulk_q})
-            full_context = f"PORTFOLIO STATS:\n{full_stat_summary}\nPREVIEW:\n{res_df.head(len(res_df)).to_string()}"
-            reply = get_ai_response(bulk_q, full_context)
+            
+            # 1. RAG LOGIC: Initialize our search engine using the loaded data
+            rag_retriever = initialize_rag_search_engine(res_df)
+            
+            # 2. DEFAULT FALLBACK: If RAG index fails, fallback safely to standard summary string
+            rag_context = full_stat_summary
+            
+            if rag_retriever:
+                # 3. RETRIEVAL: Search vector database and retrieve ONLY the top 4 matching data rows
+                matching_docs = rag_retriever.get_relevant_documents(bulk_q)
+                vector_context = "\n\n".join([doc.page_content for doc in matching_docs])
+                
+                # Combined context passing high-level math overview + precise vector row extracts
+                rag_context = f"AGGREGATED FINANCIAL STATS:\n{full_stat_summary}\n\nRELEVANT DETAILED ROWS DETECTED:\n{vector_context}"
+            
+            # 4. GENERATION: Send optimized small context packet to Gemini
+            reply = get_ai_response(bulk_q, rag_context)
             st.session_state.bulk_chat_history.append({"role": "assistant", "content": reply})
             st.rerun()
 
