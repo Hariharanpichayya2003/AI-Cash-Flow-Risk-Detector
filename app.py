@@ -52,7 +52,7 @@ if api_key_source:
     genai.configure(api_key=str(api_key_source).strip())
 
 # Use standard production Gemini model to bypass preview deprecation errors
-ai_brain = genai.GenerativeModel('models/gemini-1.5-flash')
+ai_brain = genai.GenerativeModel('models/gemini-3-flash-preview')
 
 def get_ai_response(user_query, context_data):
     prompt = f"You are 'Growfin-Bot'. Context: {context_data}\nQuestion: {user_query}"
