@@ -41,22 +41,27 @@ def load_models():
 # Hardcode your key safely for local testing or explicit assignment
 
 # Check if running on Streamlit Cloud Secrets, otherwise use the variable
+api_key_source = None
 if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    api_key_source = st.secrets["GEMINI_API_KEY"]
 else:
-    # Use your valid hardcoded key string when secrets aren't configured yet
-    genai.configure(api_key=HARDCODED_KEY)
+    st.warning("🔑 Setup Alert: Please save your Gemini API key inside Streamlit Cloud Secrets.")
 
+if api_key_source:
+    # Cast to a string to ensure transport layer compatibility on Linux containers
+    genai.configure(api_key=str(api_key_source).strip())
+
+# Initialize the Gemini Flash core engine
 ai_brain = genai.GenerativeModel('models/gemini-1.5-flash')
-
 
 def get_ai_response(user_query, context_data):
     prompt = f"You are 'Growfin-Bot'. Context: {context_data}\nQuestion: {user_query}"
     try:
         response = ai_brain.generate_content(prompt)
         return response.text
-    except:
-        return "AI is currently unavailable."
+    except Exception as e:
+        # ADVANCED DEBUGGING: Return the real system error string if it hits a snag
+        return f"AI Connection Error: {str(e)}"
 
 # --- 3. LOGIC HELPERS ---
 def apply_business_rules(risk_label, delay, dispute):
