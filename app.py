@@ -36,8 +36,19 @@ def load_models():
     le_risk = joblib.load('label_encoder.pkl')
     return model, scaler, le_risk
 
-genai.configure(api_key="AIzaSyBDAHDJI8TFfGsgvC3JHZfu8Aj07lXUyH0")
+
+# Check if running on Streamlit Cloud Secrets, otherwise fallback to local string
+# Hardcode your key safely for local testing or explicit assignment
+
+# Check if running on Streamlit Cloud Secrets, otherwise use the variable
+if "GEMINI_API_KEY" in st.secrets:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+else:
+    # Use your valid hardcoded key string when secrets aren't configured yet
+    genai.configure(api_key=HARDCODED_KEY)
+
 ai_brain = genai.GenerativeModel('models/gemini-1.5-flash')
+
 
 def get_ai_response(user_query, context_data):
     prompt = f"You are 'Growfin-Bot'. Context: {context_data}\nQuestion: {user_query}"
