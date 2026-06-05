@@ -5,7 +5,9 @@ scikit-learn
 joblib
 imbalanced-learn
 plotly
-google.generativeai
+google-generativeai
 gTTS
 streamlit-mic-recorder
-
+langchain-community
+langchain-google-genai
+chromadb
