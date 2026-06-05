@@ -37,7 +37,7 @@ def load_models():
     return model, scaler, le_risk
 
 genai.configure(api_key="AIzaSyBDAHDJI8TFfGsgvC3JHZfu8Aj07lXUyH0")
-ai_brain = genai.GenerativeModel('models/gemini-3-flash-preview')
+ai_brain = genai.GenerativeModel('models/gemini-1.5-flash')
 
 def get_ai_response(user_query, context_data):
     prompt = f"You are 'Growfin-Bot'. Context: {context_data}\nQuestion: {user_query}"
