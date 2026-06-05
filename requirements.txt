@@ -3,7 +3,7 @@ pandas
 numpy
 scikit-learn
 joblib
-imblearn
+imbalanced-learn
 plotly
 google.generativeai
 gTTS
