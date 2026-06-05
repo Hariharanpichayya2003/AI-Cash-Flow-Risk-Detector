@@ -65,30 +65,32 @@ def get_ai_response(user_query, context_data):
 # --- NEW ADDITION: 🧠 THE RAG ENGINE FUNCTION ---
 @st.cache_resource
 def initialize_rag_search_engine(df_data):
-    """
-    Transforms a text dataframe into an optimized, highly semantic local vector search engine.
-    Cached via @st.cache_resource to prevent resource initialization loops on Streamlit refreshes.
-    """
     try:
-        # Step A: Load the dataframe columns into document chunks
-        # We tell LangChain to use 'Risk_Level' as the primary text column to embed
-        loader = DataFrameLoader(df_data, page_content_column="Risk_Level")
+        # Create a copy so we don't alter the visual UI dataframe
+        rag_df = df_data.copy()
+        
+        # FIX: Combine all columns into a single clear sentence that the Vector DB can search!
+        rag_df['descriptive_text'] = rag_df.apply(
+            lambda row: f"Customer {row['Customer_ID']} has an invoice of ${row['Amount']}. "
+                        f"Payment Method is {row['Payment_Method']}. "
+                        f"Active Dispute status is {row['Dispute']}. "
+                        f"Average Past Delay is {row['Avg_Past_Delay']} days. "
+                        f"Calculated Risk Level is {row['Risk_Level']}.", axis=1
+        )
+        
+        # Tell LangChain to read our brand new combined sentence column
+        loader = DataFrameLoader(rag_df, page_content_column="descriptive_text")
         raw_documents = loader.load()
         
-        # Step B: Text Splitting (Ensures data fragments fit context pipelines cleanly)
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         split_docs = text_splitter.split_documents(raw_documents)
         
-        # Step C: Use Google Gemini's Embedding Model to translate financial data into numbers
         embeddings_engine = GoogleGenerativeAIEmbeddings(
             model="models/text-embedding-004",
             google_api_key=str(api_key_source).strip()
         )
         
-        # Step D: Spin up a lightweight, local, in-memory Chroma Vector Database
         vector_store = Chroma.from_documents(split_docs, embeddings_engine)
-        
-        # Return a retriever that fetches only the top 4 most contextually relevant rows
         return vector_store.as_retriever(search_kwargs={"k": 4})
     except Exception as e:
         st.error(f"Failed to compile RAG framework index: {e}")
