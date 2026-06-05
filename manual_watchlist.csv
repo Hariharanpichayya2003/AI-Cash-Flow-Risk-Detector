@@ -1,0 +1,16 @@
+Date,Customer_ID,Invoice_Amount,Payment_Method,Dispute,Avg_Past_Delay,Risk_Level
+2026-05-04,CUST-040,93000,Check,No,1,Low Risk
+2026-05-04,CUST-041,65000,ACH,No,12,Medium Risk
+2026-05-04,CUST-042,73000,Wire,Yes,3,High Risk
+2026-05-04,CUST-043,40000,ACH,No,35,High Risk
+2026-05-05,CUST-044,50000,Check,No,32,High Risk
+2026-05-05,CUST-045,100000,Credit Card,No,4,Low Risk
+2026-05-05,CUST-046,200000,ACH,No,14,Medium Risk
+2026-05-05,CUST-047,120000,Wire,Yes,7,High Risk
+2026-05-05,CUST-048,450000,Wire,No,0,Low Risk
+2026-05-19,CUST-009,500000,Check,No,0,Low Risk
+2026-05-19,CUST-010,100000,ACH,No,14,Medium Risk
+2026-05-19,CUST-011,50000,Credit Card,Yes,9,High Risk
+2026-06-05,CUST-012,500000,Check,No,2,Low Risk
+2026-06-05,CUST-013,124500,Credit Card,No,12,Medium Risk
+2026-06-05,CUST-014,230000,ACH,Yes,13,High Risk
