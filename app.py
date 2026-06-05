@@ -7,9 +7,27 @@ import plotly.express as px
 import google.generativeai as genai
 import datetime 
 
-# --- 1. PERSISTENCE HELPERS (PHYSICALLY SEPARATED) ---
-MANUAL_FILE = "manual_watchlist.csv"
+# --- 1. PERSISTENCE HELPERS (MUST BE AT THE VERY TOP OF THE FILE) ---
+WATCHLIST_FILE = "watchlist_data.csv"
 BULK_CACHE_FILE = "bulk_history.csv"
+SHARED_BULK_FILE = "shared_bulk_dashboard.csv"
+
+# CLOUD DEPLOYMENT FIX: Automatically initialize files with valid headers if they don't exist
+def initialize_cloud_storage():
+    standard_headers = ['Date', 'Customer_ID', 'Invoice_Amount', 'Payment_Method', 'Dispute', 'Avg_Past_Delay', 'Risk_Level']
+    bulk_headers = ['Date', 'Customer_ID', 'Amount', 'Payment_Method', 'Dispute', 'Avg_Past_Delay', 'Risk_Level']
+    
+    if not os.path.exists(WATCHLIST_FILE):
+        pd.DataFrame(columns=standard_headers).to_csv(WATCHLIST_FILE, index=False)
+        
+    if not os.path.exists(BULK_CACHE_FILE):
+        pd.DataFrame(columns=bulk_headers).to_csv(BULK_CACHE_FILE, index=False)
+        
+    if not os.path.exists(SHARED_BULK_FILE):
+        pd.DataFrame(columns=bulk_headers).to_csv(SHARED_BULK_FILE, index=False)
+
+# Execute the cloud environment initialization check immediately
+initialize_cloud_storage()
 
 def load_data(file_path):
     if os.path.exists(file_path):
@@ -28,6 +46,56 @@ def load_data(file_path):
 def save_data(df, file_path):
     df.to_csv(file_path, index=False)
 
+def load_saved_watchlist():
+    if os.path.exists(WATCHLIST_FILE):
+        try:
+            df = pd.read_csv(WATCHLIST_FILE, index_col=False)
+            df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+            
+            if 'Amount' in df.columns and 'Invoice_Amount' not in df.columns:
+                df = df.rename(columns={'Amount': 'Invoice_Amount'})
+            
+            if 'Date' not in df.columns:
+                df['Date'] = datetime.date.today()
+            
+            df['Date'] = pd.to_datetime(df['Date']).dt.date
+
+            if 'Risk_Level' not in df.columns and 'Predicted_Risk' in df.columns:
+                df = df.rename(columns={'Predicted_Risk': 'Risk_Level'})
+                
+            return df.to_dict('records')
+        except Exception as e:
+            st.error(f"Error loading watchlist: {e}")
+            return []
+    return []
+
+def save_watchlist_to_disk(watchlist_list):
+    if watchlist_list:
+        df = pd.DataFrame(watchlist_list)
+        if 'Date' not in df.columns:
+            df['Date'] = datetime.date.today()
+        else:
+            df['Date'] = df['Date'].fillna(datetime.date.today())
+        
+        cols = ['Date', 'Customer_ID', 'Invoice_Amount', 'Payment_Method', 'Dispute', 'Avg_Past_Delay', 'Risk_Level']
+        existing_cols = [c for c in cols if c in df.columns]
+        df = df[existing_cols] 
+        df.to_csv(WATCHLIST_FILE, index=False)
+
+def load_shared_data(): 
+    if os.path.exists(WATCHLIST_FILE):
+        try:
+            df = pd.read_csv(WATCHLIST_FILE)
+            if 'Invoice_Amount' in df.columns:
+                df = df.rename(columns={'Invoice_Amount': 'Amount'})
+            return df
+        except:
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+def save_to_shared(df): 
+    df.to_csv(WATCHLIST_FILE, index=False)
+
 # --- 2. ASSET LOADING & AI SETUP ---
 @st.cache_resource
 def load_models():
@@ -37,7 +105,8 @@ def load_models():
     return model, scaler, le_risk
 
 genai.configure(api_key="AIzaSyBDAHDJI8TFfGsgvC3JHZfu8Aj07lXUyH0")
-ai_brain = genai.GenerativeModel('models/gemini-1.5-flash-preview')
+# FIX: Switched to stable API string
+ai_brain = genai.GenerativeModel('models/gemini-1.5-flash')
 
 def get_ai_response(user_query, context_data):
     prompt = f"You are 'Growfin-Bot'. Context: {context_data}\nQuestion: {user_query}"
@@ -90,7 +159,9 @@ def process_batch(df_input):
 st.set_page_config(page_title="AI Cash Flow Risk Detector", layout="wide")
 st.title("🛡️ AI Cash Flow Risk Detector")
 
-# Session State for Chats
+# Initialize session structures safely
+if 'watchlist' not in st.session_state: 
+    st.session_state.watchlist = load_saved_watchlist()
 if 'chat_history' not in st.session_state: st.session_state.chat_history = []
 if 'bulk_chat_history' not in st.session_state: st.session_state.bulk_chat_history = []
 
@@ -118,22 +189,27 @@ if st.sidebar.button("Analyze & Add to Watchlist"):
         'Avg_Past_Delay': past_delay, 'Risk_Level': final_risk
     }])
     
-    old_manual = load_data(MANUAL_FILE)
-    save_data(pd.concat([old_manual, new_entry], ignore_index=True), MANUAL_FILE)
+    old_manual = load_data(WATCHLIST_FILE)
+    save_data(pd.concat([old_manual, new_entry], ignore_index=True), WATCHLIST_FILE)
+    st.session_state.watchlist = load_saved_watchlist()  
     st.rerun()
 
 if st.sidebar.button("Clear All Saved Data"):
-    if os.path.exists(MANUAL_FILE): os.remove(MANUAL_FILE)
+    if os.path.exists(WATCHLIST_FILE): os.remove(WATCHLIST_FILE)
     if os.path.exists(BULK_CACHE_FILE): os.remove(BULK_CACHE_FILE)
+    if os.path.exists(SHARED_BULK_FILE): os.remove(SHARED_BULK_FILE)
+    st.session_state.watchlist = []
+    st.session_state.bulk_results = pd.DataFrame()
     st.session_state.chat_history = []
     st.session_state.bulk_chat_history = []
+    initialize_cloud_storage()  
     st.rerun()
 
 tab1, tab2 = st.tabs(["Live Monitoring Watchlist", "Bulk Upload (CSV)"])
 
 # --- TAB 1: INDIVIDUAL WATCHLIST ---
 with tab1:
-    w_df = load_data(MANUAL_FILE)
+    w_df = load_data(WATCHLIST_FILE)
     if not w_df.empty:
         st.subheader("📈 Daily Exposure Trend (Manual Invoices)")
         daily_trend = w_df.groupby('Date')['Invoice_Amount'].sum().reset_index()
@@ -166,8 +242,6 @@ with tab1:
 with tab2:
     st.header("📂 Bulk Invoice Analysis")
     
-    # 1. NEW: Initialize bulk storage from DISK so it persists across refreshes
-    # Using BULK_CACHE_FILE specifically to keep it separate from Tab 1
     if 'bulk_results' not in st.session_state:
         if os.path.exists(BULK_CACHE_FILE):
             st.session_state.bulk_results = pd.read_csv(BULK_CACHE_FILE)
@@ -190,7 +264,6 @@ with tab2:
                         ignore_index=True
                     ).drop_duplicates()
                     
-                    # NEW: Save to disk immediately after adding
                     st.session_state.bulk_results.to_csv(BULK_CACHE_FILE, index=False)
                     st.success(f"Added {len(new_results)} records permanently!")
                     st.rerun()
@@ -212,16 +285,14 @@ with tab2:
         btn_col1, btn_col2 = st.columns(2)
         with btn_col1:
             if st.button("🚀 Push ALL Session Data to Shared Dashboard"):
-                # FUNCTIONALITY: We save this to a NEW shared file instead of WATCHLIST_FILE
-                # to prevent bulk data from leaking into the Tab 1 Manual Watchlist
-                SHARED_BULK_FILE = "shared_bulk_dashboard.csv"
                 st.session_state.bulk_results.to_csv(SHARED_BULK_FILE, index=False)
                 st.success("All session records published to Bulk Client Portal!")
                 
         with btn_col2:
             if st.button("🗑️ Clear Local Session"):
                 st.session_state.bulk_results = pd.DataFrame()
-                if os.path.exists(BULK_CACHE_FILE): os.remove(BULK_CACHE_FILE) # Clear the disk file
+                if os.path.exists(BULK_CACHE_FILE): os.remove(BULK_CACHE_FILE)
+                initialize_cloud_storage()
                 st.rerun()
 
         st.divider()
