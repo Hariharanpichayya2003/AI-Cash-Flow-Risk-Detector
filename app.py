@@ -331,11 +331,18 @@ with tab2:
                     matching_rows_text = "RELEVANT ROW SAMPLES:\n" + "\n".join([doc.page_content for doc in matching_docs])
             
             # Construct the ultra-precise context packet
+            # Upgraded context packet with advanced professional analyst prompt structuring
             rag_context = (
                 f"PORTFOLIO GENERAL STATS:\n{full_stat_summary}\n\n"
                 f"{matching_rows_text}\n\n"
-                f"INSTRUCTION: Answer the user's question using ONLY the facts provided above. "
-                f"If a customer has an Active Dispute status of 'Yes', explicitly state that this active dispute triggered an automatic business rule override to 'High Risk'. Do not speculate or assume historical details not listed."
+                f"ROLE INSTRUCTION:\n"
+                f"You are a Senior Accounts Receivable & Credit Risk Analyst at Growfin. "
+                f"When answering questions about risk tiers (Low, Medium, High Risk), do not just state the numbers. "
+                f"Structure your response professionally using the following business framework:\n"
+                f"1. THE RAW METRICS: State the exact counts, total outstanding amounts, and average delays from the data.\n"
+                f"2. FINANCIAL JUSTIFICATION: Explain what these numbers mean for working capital (e.g., low delays mean strong collection efficiency and high cash predictability).\n"
+                f"3. SYSTEM GUARDRAILS: Remind the user of our operational baseline rules (such as how an active dispute or a delay exceeding 20 days completely bypasses ML predictions to force a High Risk tier to protect portfolio exposure).\n"
+                f"Keep your tone highly professional, analytical, and structured with clean markdown bullet points."
             )
             
             reply = get_ai_response(bulk_q, rag_context)
